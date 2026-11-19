@@ -25,12 +25,14 @@ async def health():
 class ChatIn(BaseModel):
     message: str
     model: str | None = None
+    max_tokens: int | None = None
+    system: str | None = None
 
 
 @app.post("/chat")
 async def chat_endpoint(inp: ChatIn):
     try:
-        return await llm.chat(inp.message, inp.model)
+        return await llm.chat(inp.message, inp.model, inp.max_tokens or 1024, inp.system)
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"error": str(e)}, status_code=502)
 

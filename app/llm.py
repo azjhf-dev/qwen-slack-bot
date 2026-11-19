@@ -19,7 +19,7 @@ PORTAL_BASE = "https://portal.nousresearch.com"
 INFERENCE_BASE = os.environ.get("NOUS_INFERENCE_BASE", "https://inference-api.nousresearch.com/v1")
 NOUS_CLIENT_ID = os.environ.get("NOUS_CLIENT_ID", "hermes-cli")
 DEFAULT_MODEL = os.environ.get("MODEL_NAME", "qwen/qwen4-max:free")
-GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+GROQ_MODEL = os.environ.get("GROQ_MODEL", "qwen/qwen3.8-27b")
 PROVIDER = os.environ.get("PROVIDER", "auto")  # nous | groq | auto
 
 _state = {
@@ -86,13 +86,13 @@ async def _nous_access_token(client: httpx.AsyncClient) -> str:
         return await _refresh_nous(client)
 
 
-async def _chat_nous(client: httpx.AsyncClient, messages, model=None) -> dict:
+async def _chat_nous(client: httpx.AsyncClient, messages, model=None, max_tokens: int = 1024) -> dict:
     at = await _nous_access_token(client)
     r = await client.post(
         f"{INFERENCE_BASE}/chat/completions",
         headers={"Authorization": f"Bearer {at}"},
-        json={"model": model or DEFAULT_MODEL, "messages": messages, "max_tokens": 1024},
-        timeout=60,
+        json={"model": model or DEFAULT_MODEL, "messages": messages, "max_tokens": max_tokens},
+        timeout=180,
     )
     if r.status_code == 401:
         # one retry with a forced refresh
@@ -100,8 +100,8 @@ async def _chat_nous(client: httpx.AsyncClient, messages, model=None) -> dict:
         r = await client.post(
             f"{INFERENCE_BASE}/chat/completions",
             headers={"Authorization": f"Bearer {at}"},
-            json={"model": model or DEFAULT_MODEL, "messages": messages, "max_tokens": 1024},
-            timeout=60,
+            json={"model": model or DEFAULT_MODEL, "messages": messages, "max_tokens": max_tokens},
+            timeout=180,
         )
     r.raise_for_status()
     data = r.json()
@@ -110,7 +110,7 @@ async def _chat_nous(client: httpx.AsyncClient, messages, model=None) -> dict:
             "usage": data.get("usage")}
 
 
-async def _chat_groq(client: httpx.AsyncClient, messages, model=None) -> dict:
+async def _chat_groq(client: httpx.AsyncClient, messages, model=None, max_tokens: int = 1024) -> dict:
     key = os.environ.get("GROQ_API_KEY")
     if not key:
         raise RuntimeError("groq_not_configured")
@@ -118,8 +118,8 @@ async def _chat_groq(client: httpx.AsyncClient, messages, model=None) -> dict:
     r = await client.post(
         "https://api.groq.com/openai/v1/chat/completions",
         headers={"Authorization": f"Bearer {key}"},
-        json={"model": m, "messages": messages, "max_tokens": 1024},
-        timeout=60,
+        json={"model": m, "messages": messages, "max_tokens": max_tokens},
+        timeout=180,
     )
     r.raise_for_status()
     data = r.json()
@@ -133,16 +133,16 @@ SYSTEM_PROMPT = (
 )
 
 
-async def chat(user_text: str, model: str = None) -> dict:
+async def chat(user_text: str, model: str = None, max_tokens: int = 1024, system: str = None) -> dict:
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": system or SYSTEM_PROMPT},
         {"role": "user", "content": user_text},
     ]
     async with httpx.AsyncClient() as client:
         errors = []
         if PROVIDER in ("nous", "auto") and nous_configured():
             try:
-                return await _chat_nous(client, messages, model)
+                return await _chat_nous(client, messages, model, max_tokens)
             except Exception as e:  # noqa: BLE001
                 log.warning("nous failed: %s", e)
                 errors.append(f"nous: {e}")
@@ -150,7 +150,7 @@ async def chat(user_text: str, model: str = None) -> dict:
                     raise
         if PROVIDER in ("groq", "auto") and groq_configured():
             try:
-                return await _chat_groq(client, messages, model)
+                return await _chat_groq(client, messages, model, max_tokens)
             except Exception as e:  # noqa: BLE001
                 log.warning("groq failed: %s", e)
                 errors.append(f"groq: {e}")
