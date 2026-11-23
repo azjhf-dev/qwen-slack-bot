@@ -109,7 +109,8 @@ async def chat_endpoint(inp: ChatIn, request: Request):
         return JSONResponse({"error": "message or messages required"}, status_code=400, headers=h)
     max_tokens = min(inp.max_tokens or 1024, MAX_TOKENS_CAP)
     try:
-        return await llm.chat(message, model, max_tokens, inp.system)
+        result = await llm.chat(message, model, max_tokens, inp.system)
+        return JSONResponse(result, headers=h)
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"error": str(e)}, status_code=502, headers=h)
 
